@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """命令行入口:
 python -m auto_piano --file songs/xiaoxingxing.txt
-python -m auto_piano --midi x.mid --vel 110
+python -m auto_piano --file x.txt --vel 110      # --vel 只对简谱/音名序列生效
 python -m auto_piano --jianpu "1 1 5 5 6 6 5-" --key C --bpm 100
 python -m auto_piano --notes "C4:1 C4:1 G4:2"
 python -m auto_piano --list         # 列出可用谱面 (用户库 + 包内示例)
@@ -143,7 +143,8 @@ def main(argv=None):
     ap.add_argument('--format', choices=['note_seq', 'jianpu', 'midi'],
                     help='强制指定谱面格式')
     ap.add_argument('--bpm', type=float, help='速度 (拍/分钟), 覆盖默认 109')
-    ap.add_argument('--vel', type=int, default=DEFAULT_VELOCITY, help='力度 1~127')
+    ap.add_argument('--vel', type=int, default=DEFAULT_VELOCITY,
+                    help='力度 1~127 (仅对简谱/音名序列生效; MIDI 用文件自带的每音符力度)')
     ap.add_argument('--max-sec', type=float,
                     help='只演奏前 N 秒 (预览用, 长曲先听开头)')
     ap.add_argument('--list', action='store_true',

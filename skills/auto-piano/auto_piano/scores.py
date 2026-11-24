@@ -128,9 +128,12 @@ def parse_jianpu(text, key='C', beat=DEFAULT_BEAT, velocity=DEFAULT_VELOCITY):
 
 
 # ---------- 3. MIDI 文件 ----------
-def parse_midi(path, velocity=DEFAULT_VELOCITY, min_dur=0.05):
+def parse_midi(path, _velocity=DEFAULT_VELOCITY, min_dur=0.05):
     """解析 SMF 格式 0/1 MIDI 文件, 返回以秒为单位的事件列表。
     忽略打击乐通道(9), 音符裁剪到 A0~C8。
+
+    `_velocity` 对 MIDI **不生效**: MIDI 自带每音符力度(0~127), 直接原样输出;
+    统一力度只属于没有力度的谱面(简谱 / 音名序列), 故此处保留形参仅为调用签名一致。
 
     时间换算走「两遍法」: 第一遍只收集音符的绝对 tick 和各轨 tempo 事件, 第二遍用
     分段积分的 tempo map 把 tick 换算成秒。**不能**用「当前 tempo × 绝对 tick」,
@@ -139,7 +142,7 @@ def parse_midi(path, velocity=DEFAULT_VELOCITY, min_dur=0.05):
     data = open(path, 'rb').read()
     if data[:4] != b'MThd':
         raise ValueError("不是有效的 MIDI 文件 (缺少 MThd)")
-    fmt, ntrk, division = struct.unpack('>HHH', data[8:14])
+    _fmt, ntrk, division = struct.unpack('>HHH', data[8:14])   # fmt(0/1/2) 不参与决策, 保留解包对齐字节偏移
     if division == 0:
         raise ValueError("MIDI 文件损坏: time division 为 0")
     smpte = bool(division & 0x8000)   # SMPTE 时基: 时间与 tempo 无关
