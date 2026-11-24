@@ -1,0 +1,14 @@
+{
+  "name": "auto-piano",
+  "version": "1.0.0",
+  "description": "FreePiano auto-playing skill for pi coding agent: play MIDI files, numbered notation, or note sequences via FreePiano on Windows, no foreground focus needed.",
+  "keywords": ["pi-package", "agent-skills", "midi", "piano", "freepiano", "windows"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YOUR_USERNAME/auto-piano.git"
+  },
+  "pi": {
+    "skills": ["./skills"]
+  }
+}
