@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR_USERNAME/auto-piano.git"
+    "url": "git+https://github.com/ljlsasuke/auto-piano.git"
   },
   "pi": {
     "skills": ["./skills"]

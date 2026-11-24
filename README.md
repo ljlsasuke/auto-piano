@@ -14,7 +14,7 @@ FreePiano 自动演奏 skill —— 让 AI 编码代理（pi / Claude Code / Cod
 ### 方式一：pi package（推荐）
 
 ```bash
-pi install git:github.com/YOUR_USERNAME/auto-piano
+pi install git:github.com/ljlsasuke/auto-piano
 ```
 
 ### 方式二：Agent Skills 通用方式
@@ -23,7 +23,7 @@ pi install git:github.com/YOUR_USERNAME/auto-piano
 
 ```bash
 # pi
-git clone https://github.com/YOUR_USERNAME/auto-piano.git
+git clone https://github.com/ljlsasuke/auto-piano.git
 cp -r auto-piano/skills/auto-piano ~/.pi/agent/skills/
 
 # Claude Code / 其他兼容 Agent Skills 规范的实现
