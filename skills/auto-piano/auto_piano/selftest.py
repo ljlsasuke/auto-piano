@@ -156,6 +156,87 @@ def _path_priority_tests():
         os.environ.clear(); os.environ.update(saved_env)
 
 
+def _vlq(n):
+    """MIDI 变长量编码 (delta time 与元事件长度字段用)"""
+    out = [n & 0x7F]
+    n >>= 7
+    while n:
+        out.append((n & 0x7F) | 0x80)
+        n >>= 7
+    return bytes(reversed(out))
+
+
+def _make_mid(path, division, tracks):
+    """拼一个最小 SMF: tracks 是 [[(delta_tick, 原始字节串), ...], ...]"""
+    import struct
+    fmt = 1 if len(tracks) > 1 else 0
+    hdr = b'MThd' + struct.pack('>IHHH', 6, fmt, len(tracks), division)
+    body = b''
+    for tr in tracks:
+        raw = b''.join(_vlq(dt) + ev for dt, ev in tr)
+        body += b'MTrk' + struct.pack('>I', len(raw)) + raw
+    Path(path).write_bytes(hdr + body)
+
+
+def _midi_timing_tests():
+    """MIDI 时间轴契约: tempo 分段积分 / format1 控制轨 / SMPTE 时基 / meta 变长长度
+
+    旧实现用「当前 tempo × 绝对 tick」, 多 tempo 文件的时长会偏 +66%~+386%;
+    SMPTE 与长 meta 文件则直接抛异常。这里用 4 个内存合成的小文件钉死精确秒数,
+    不依赖任何真实谱面, 也不依赖 Windows。"""
+    import os, shutil, tempfile
+
+    tmp = tempfile.mkdtemp(prefix='ap_midi_')
+    cases = []
+    try:
+        # A: 两段 tempo (1 拍 = 480 tick), 前段 120bpm, 后段 60bpm
+        pa = os.path.join(tmp, 'tempo2.mid')
+        _make_mid(pa, 480, [[
+            (0, b'\xff\x51\x03\x07\xa1\x20'),      # tick 0  : 500000us (120bpm)
+            (480, b'\xff\x51\x03\x0f\x42\x40'),    # tick 480: 1000000us (60bpm)
+            (0, b'\x90\x3c\x64'),                  # C4 on  @480
+            (1440, b'\x80\x3c\x40'),               # C4 off @1920
+        ]])
+        cases.append(('两段 tempo', pa, 0.50, 3.00))
+
+        # B: format 1, tempo 只在第 0 轨 (控制轨), 音符在第 1 轨
+        pb = os.path.join(tmp, 'fmt1.mid')
+        _make_mid(pb, 480, [
+            [(0, b'\xff\x51\x03\x07\xa1\x20'), (960, b'\xff\x51\x03\x0f\x42\x40')],
+            [(960, b'\x90\x3c\x64'), (960, b'\x80\x3c\x40')],
+        ])
+        cases.append(('format1 控制轨 tempo', pb, 1.00, 2.00))
+
+        # C: SMPTE 时基 -25fps x 40 tick/frame = 1000 tick/秒 (与 tempo 无关)
+        pc = os.path.join(tmp, 'smpte.mid')
+        _make_mid(pc, 0xE728, [[(1000, b'\x90\x3c\x64'), (2000, b'\x80\x3c\x40')]])
+        cases.append(('SMPTE 时基', pc, 1.00, 2.00))
+
+        # D: 200 字节文本元事件 (长度字段是两字节 VLQ), 无 tempo -> 默认 120bpm
+        pd = os.path.join(tmp, 'meta.mid')
+        _make_mid(pd, 480, [[
+            (0, b'\xff\x03' + _vlq(200) + b'A' * 200),
+            (480, b'\x90\x3c\x64'),
+            (480, b'\x80\x3c\x40'),
+        ]])
+        cases.append(('meta 变长长度', pd, 0.50, 0.50))
+
+        for label, path, want_start, want_dur in cases:
+            try:
+                ev = scores.load_file(path)
+            except Exception as e:
+                # 解析器直接抛异常也要记成失败项, 而不是让整个自测崩掉
+                _check(f"{label}: 解析不抛异常", False, f'{type(e).__name__}: {e}')
+                continue
+            got_start, got_dur = (ev[0][0], ev[0][1]) if ev else (float('nan'), float('nan'))
+            _check(f"{label}: 起点秒数", abs(got_start - want_start) < 0.01,
+                   f'得到 {got_start:.2f}, 期望 {want_start:.2f}')
+            _check(f"{label}: 时值秒数", abs(got_dur - want_dur) < 0.01,
+                   f'得到 {got_dur:.2f}, 期望 {want_dur:.2f}')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def run():
     print("== auto_piano 离线自测 ==")
 
@@ -218,6 +299,9 @@ def run():
         _check("MIDI 力度合法", all(1 <= e[3] <= 127 for e in ev))
     else:
         _check("MIDI 样例存在", False, str(mid))
+
+    # 6b. MIDI 时间轴契约 (tempo 分段积分 / 跨轨 / SMPTE / 变长 meta)
+    _midi_timing_tests()
 
     # 7. 已保存谱面都能解析 (用户库 + 包内示例)
     bad = []
