@@ -130,18 +130,24 @@ def parse_jianpu(text, key='C', beat=DEFAULT_BEAT, velocity=DEFAULT_VELOCITY):
 # ---------- 3. MIDI 文件 ----------
 def parse_midi(path, velocity=DEFAULT_VELOCITY, min_dur=0.05):
     """解析 SMF 格式 0/1 MIDI 文件, 返回以秒为单位的事件列表。
-    忽略打击乐通道(9), 音符裁剪到 A0~C8。"""
+    忽略打击乐通道(9), 音符裁剪到 A0~C8。
+
+    时间换算走「两遍法」: 第一遍只收集音符的绝对 tick 和各轨 tempo 事件, 第二遍用
+    分段积分的 tempo map 把 tick 换算成秒。**不能**用「当前 tempo × 绝对 tick」,
+    那是旧实现的 bug: tempo 是分段生效的, 每次变速都会把前面已累计的时间抹掉重算
+    (format 1 里 tempo 只在第 0 轨, 其他轨会被最后一条 tempo 全程套用)。"""
     data = open(path, 'rb').read()
     if data[:4] != b'MThd':
         raise ValueError("不是有效的 MIDI 文件 (缺少 MThd)")
     fmt, ntrk, division = struct.unpack('>HHH', data[8:14])
+    if division == 0:
+        raise ValueError("MIDI 文件损坏: time division 为 0")
+    smpte = bool(division & 0x8000)   # SMPTE 时基: 时间与 tempo 无关
     pos = 14
-    ons = {}          # (ch,note) -> (start_sec, vel)
-    events = []
-    us_pq = 500000    # tempo 状态跨轨共享(format 1 的 tempo 事件在第 0 轨控制轨上)
-
-    def tick2sec(tick, us_pq):
-        return tick * us_pq / 1e6 / division
+    raw = []                # (start_tick, end_tick, note, vel)
+    open_notes = {}         # (track, ch, note) -> (start_tick, vel)
+    tempos = {}             # 绝对 tick -> us_pq (set tempo 元事件)
+    last_tick = 0
 
     for ti in range(ntrk):
         if data[pos:pos + 4] != b'MTrk':
@@ -172,27 +178,29 @@ def parse_midi(path, velocity=DEFAULT_VELOCITY, min_dur=0.05):
             ch = status & 0x0F
             if typ == 0x90 or typ == 0x80:
                 note, vel = data[p], data[p + 1]; p += 2
-                t = tick2sec(tick, us_pq)
                 if typ == 0x90 and vel > 0 and ch != 9:
-                    ons[(ch, note)] = (t, vel)
+                    open_notes[(ti, ch, note)] = (tick, vel)
                 else:
-                    key = (ch, note)
-                    if key in ons:
-                        s, v = ons.pop(key)
-                        n = min(max(note, 21), 108)
-                        if t - s >= min_dur:
-                            events.append((s, t - s, n, v))
+                    key = (ti, ch, note)
+                    if key in open_notes:
+                        s, v = open_notes.pop(key)
+                        raw.append((s, tick, note, v))
             elif typ == 0xB0 or typ == 0xA0 or typ == 0xE0:
                 p += 2
             elif typ == 0xC0 or typ == 0xD0:
                 p += 1
             elif status == 0xFF:
-                meta = data[p]
-                length_m = data[p + 1]
-                payload = data[p + 2:p + 2 + length_m]
-                p += 2 + length_m
-                if meta == 0x51:  # set tempo
-                    us_pq = (payload[0] << 16) | (payload[1] << 8) | payload[2]
+                meta = data[p]; p += 1
+                length_m = 0                      # meta 长度是变长字段, 不能只读 1 字节
+                while True:
+                    b = data[p]; p += 1
+                    length_m = (length_m << 7) | (b & 0x7F)
+                    if not b & 0x80:
+                        break
+                if meta == 0x51 and length_m >= 3:
+                    payload = data[p:p + 3]
+                    tempos[tick] = (payload[0] << 16) | (payload[1] << 8) | payload[2]
+                p += length_m
             elif status in (0xF0, 0xF7):  # sysex: 跳过变长长度字段及其数据
                 ln = 0
                 while True:
@@ -203,13 +211,46 @@ def parse_midi(path, velocity=DEFAULT_VELOCITY, min_dur=0.05):
                 p += ln
             else:
                 raise ValueError(f"MIDI 未知状态字节 {status:#04x} (偏移 {p - 1})")
+        last_tick = max(last_tick, tick)
         pos = end
+
+    # ---- tempo map: tick -> 秒 (分段累加, 全局一致, 与解析顺序/轨号无关) ----
+    if smpte:
+        fps = 256 - (division >> 8)          # 高字节是负的每秒帧数 (二补码)
+        rate = fps * (division & 0xFF)       # 每秒 tick 数
+        tick2sec = lambda t: t / rate
+    else:
+        segs = []                            # (起始 tick, 该 tick 处已累计秒数, 该段 us_pq)
+        prev_tick, us, acc = 0, 500000, 0.0  # 默认 120bpm 起算
+        for tk in sorted(tempos):
+            if tk < 0:
+                continue
+            acc += (tk - prev_tick) * us / 1e6 / division
+            segs.append((tk, acc, tempos[tk]))
+            prev_tick, us = tk, tempos[tk]
+
+        def tick2sec(tick):
+            lo, hi = 0, len(segs)
+            while lo < hi:                   # 二分找 tick 落在哪一段
+                mid = (lo + hi) // 2
+                if segs[mid][0] <= tick:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            base_tick, base_sec, cur_us = segs[lo - 1] if lo else (0, 0.0, 500000)
+            return base_sec + (tick - base_tick) * cur_us / 1e6 / division
+
+    events = []
+    for s, e, note, vel in raw:
+        t0, t1 = tick2sec(s), tick2sec(e)
+        if t1 - t0 >= min_dur:
+            events.append((t0, t1 - t0, min(max(note, 21), 108), vel))
     # 没关掉的音在曲末关闭
-    if ons:
-        maxt = max(s for s, _ in ons.values()) + 1.0
-        for (ch, note), (s, v) in ons.items():
-            n = min(max(note, 21), 108)
-            events.append((s, maxt - s, n, v))
+    for (_ti, _ch, note), (s, v) in open_notes.items():
+        t0 = tick2sec(s)
+        t1 = max(tick2sec(last_tick), t0 + 1.0)
+        if t1 - t0 >= min_dur:
+            events.append((t0, t1 - t0, min(max(note, 21), 108), v))
     events.sort(key=lambda e: e[0])
     return events
 
