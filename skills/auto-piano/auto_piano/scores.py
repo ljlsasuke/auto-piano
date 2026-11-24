@@ -150,7 +150,7 @@ def parse_midi(path, _velocity=DEFAULT_VELOCITY, min_dur=0.05):
     smpte = bool(division & 0x8000)   # SMPTE 时基: 时间与 tempo 无关
     pos = 14
     raw = []                # (start_tick, end_tick, note, vel)
-    open_notes = {}         # (track, ch, note) -> (start_tick, vel)
+    open_notes = {}         # (track, ch, note) -> (start_tick, vel); 重复 on 按 retrigger 截断
     tempos = {}             # 绝对 tick -> us_pq (set tempo 元事件)
     last_tick = 0
 
@@ -184,7 +184,11 @@ def parse_midi(path, _velocity=DEFAULT_VELOCITY, min_dur=0.05):
             if typ == 0x90 or typ == 0x80:
                 note, vel = data[p], data[p + 1]; p += 2
                 if typ == 0x90 and vel > 0 and ch != 9:
-                    open_notes[(ti, ch, note)] = (tick, vel)
+                    key = (ti, ch, note)
+                    if key in open_notes:      # 重复 note-on(未配对 off, 非法但常见):
+                        s0, v0 = open_notes.pop(key)   # 按 retrigger 截断前一个, 不丢音
+                        raw.append((s0, tick, note, v0))
+                    open_notes[key] = (tick, vel)
                 else:
                     key = (ti, ch, note)
                     if key in open_notes:

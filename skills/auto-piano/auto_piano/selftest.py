@@ -221,6 +221,14 @@ def _midi_timing_tests():
         ]])
         cases.append(('meta 变长长度', pd, 0.50, 0.50))
 
+        # E: 重复 note-on (同一轨/通道/音号未配对 off, 非法但常见) -> retrigger 截断前一个
+        pe = os.path.join(tmp, 'dup_on.mid')
+        _make_mid(pe, 480, [[
+            (0, b'\x90\x3c\x50'),      # tick 0  : C4 on  vel 80
+            (480, b'\x90\x3c\x64'),    # tick 480: C4 on  vel 100 (没有 off)
+            (480, b'\x80\x3c\x40'),    # tick 960: C4 off
+        ]])
+
         for label, path, want_start, want_dur in cases:
             try:
                 ev = scores.load_file(path)
@@ -233,11 +241,21 @@ def _midi_timing_tests():
                    f'得到 {got_start:.2f}, 期望 {want_start:.2f}')
             _check(f"{label}: 时值秒数", abs(got_dur - want_dur) < 0.01,
                    f'得到 {got_dur:.2f}, 期望 {want_dur:.2f}')
+
+        # E: 重复 on 的两个音都要在 (前一个在第二次 on 处被截断, 不静默丢弃)
+        try:
+            ev = scores.load_file(pe)
+            got = [(round(e[0], 2), round(e[1], 2), e[3]) for e in ev]
+            want = [(0.0, 0.5, 80), (0.5, 0.5, 100)]
+            _check("重复 note-on: retrigger 保留两个音", got == want, f'得到 {got}, 期望 {want}')
+        except Exception as e:
+            _check("重复 note-on: 解析不抛异常", False, f'{type(e).__name__}: {e}')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def run():
+    print("== auto_piano 离线自测 ==")
     print("== auto_piano 离线自测 ==")
 
     # 1. 音名 <-> MIDI
