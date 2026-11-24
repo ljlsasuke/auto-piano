@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import scores, config
 from .keyboard import Player, find_window, client_scale
-from .notify import notify, INFO, WARN
+from .notify import notify, WARN
 from .config import DEFAULT_BEAT, DEFAULT_VELOCITY
 
 
@@ -111,7 +111,6 @@ def main(argv=None):
     ap.add_argument('--setup', action='store_true', help='交互式登记 FreePiano 路径')
     ap.add_argument('--dir', help='配合 --setup: 直接登记该目录 (非交互, 不弹提示)')
     ap.add_argument('--install', action='store_true', help='自动下载安装 FreePiano')
-    ap.add_argument('--no-notify', action='store_true', help='不弹完成/错误提示框')
     args = ap.parse_args(argv)
 
     if args.doctor:
@@ -162,16 +161,12 @@ def main(argv=None):
 
         p = Player()
         used = p.play(events)
-        msg = f"{len(events)} 个音符事件演奏完成 ✓\n耗时 {used:.1f} 秒"
-        print(msg)
-        if not args.no_notify:
-            notify("演奏完成 ✓", msg, INFO)
+        print(f"{len(events)} 个音符事件演奏完成 ✓\n耗时 {used:.1f} 秒")
         return 0
 
     except Exception as e:
         print(f"错误: {e}", file=sys.stderr)
-        if not args.no_notify:
-            notify("演奏失败/中止", str(e), WARN)
+        notify("演奏失败/中止", str(e), WARN)
         return 1
 
 

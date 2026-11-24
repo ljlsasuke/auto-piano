@@ -99,11 +99,15 @@ python -m auto_piano --midi songs/mitsuha_theme.mid
 python -m auto_piano --jianpu "1 1 5 5 6 6 5-" --key C --bpm 100
 python -m auto_piano --notes "C4:1 C4:1 G4:2"
 
-# 参数: --bpm 速度 | --vel 1~127 力度 | --key 简谱的1对应音 | --no-notify 关弹窗
+# 参数: --bpm 速度 | --vel 1~127 力度 | --key 简谱的1对应音
 # 注意: --bpm / --vel 只对音名序列和简谱生效; MIDI 用文件内自带的 tempo 与力度
 ```
 
-默认完成/失败会弹 Windows 置顶提示框；脚本/批处理中加 `--no-notify` 避免阻塞。
+## 弹窗行为
+
+- **演奏成功**: 只用 `print` 输出结果，**不弹窗**，命令立即返回 —— agent/脚本/交互终端都无需任何参数。
+- **演奏失败/中止**: 弹**阻塞式**置顶错误弹窗 (`MessageBoxW`，须用户点确定) + 蜂鸣提示，
+  同时错误写入 stderr。失败必须弹窗，无开关 —— 用户需要第一时间知道演奏失败的原因。
 
 ## 谱面格式
 
@@ -147,6 +151,7 @@ p.play(events)                        # 演奏；窗口中途被关会抛异常�
 
 ## 注意事项 / 排障
 
+- **成功只用 print 输出，不弹窗；失败必弹窗（阻塞式）**，两种场景都不需要传任何参数
 - **先 `--doctor` 再弹**：一次看清 Python/安装/进程/窗口各环节。
 - **没声音**：`--test` 无声 → 检查 FreePiano 音源菜单是否加载音源（默认自带 mdaPiano）、系统音量。
 - 窗口被最小化会**自动恢复**（`SW_SHOWNOACTIVATE`，不抢焦点）；被关闭则演奏中止并释放全部按键防卡音。

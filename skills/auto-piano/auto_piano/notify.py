@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Windows 弹窗 / 蜂鸣提示 (完成、中止、错误)"""
+"""Windows 错误弹窗 / 蜂鸣提示 (仅失败/中止时使用; 成功用 print 输出)"""
 import ctypes
 
 TOPMOST, SETFG = 0x40000, 0x10000
