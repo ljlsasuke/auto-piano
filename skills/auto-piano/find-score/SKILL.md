@@ -20,7 +20,8 @@ description: 检索乐曲的权威谱源，MIDI 文件优先。当 auto-piano �
 
 ## 检索流程（按顺序执行，不得跳步）
 
-1. **先查本地**：主 skill 的 `songs/` 目录是否已有该曲 → 有则直接用，结束。
+1. **先查本地**：`python -m auto_piano --list` 看**用户谱面库**（`%APPDATA%/auto_piano/songs`）
+   和**包内示例**（`{auto-piano}/songs/`）里是否已有该曲 → 有则 `--file <曲名>` 直接用，结束。
 2. **搜 MIDI**（多角度并发查询）：
    - 「曲名 midi」「曲名 .mid」「曲名 midi download」「曲名 midi file」
    - 日文/韩文/外文歌用原文+罗马音+英文名各查一遍（如「三葉のテーマ midi」「Mitsuha no Theme midi」）
@@ -30,7 +31,8 @@ description: 检索乐曲的权威谱源，MIDI 文件优先。当 auto-piano �
    - 文件头必须是 `MThd`（ASCII，前 4 字节）
    - 用 `auto_piano.scores.load_file()` 试解析：确认能解析、时长合理（< 15 分钟）、
      音域在 A0~C8（MIDI 21~108）、轨数/音符数合理（纯音轨，无打击乐主导）
-   - 验证通过 → 交回主 skill 演奏；演奏完按主 skill 的保存流程询问是否存入 `songs/`
+   - 验证通过 → 交回主 skill 演奏；演奏完按主 skill 的保存流程询问是否存入**用户谱面库**
+     （`python -m auto_piano --save <文件>`，不要写进包目录 `songs/`——包更新会清掉）
 4. **找不到可靠的原始 MIDI → 停下，把决策权交给用户**：
    - 明确告知：「MIDI 是最权威的谱源，我没有找到可靠的原始 MIDI 文件」
    - 给出用户自己去找的线索：推荐搜索关键词、可能有的站点、钢琴网/MuseScore 等导出途径
@@ -60,4 +62,5 @@ description: 检索乐曲的权威谱源，MIDI 文件优先。当 auto-piano �
 ## 输出约定
 
 向主 skill / 用户报告时必须包含：谱源类型（MIDI/图片谱/转录）、来源 URL、验证结果
-（事件数/时长/音域）、以及置信度（MIDI=精确，转录=可能有误差）。
+（事件数/时长/音域）、以及置信度（MIDI=精确，转录=可能有误差）、
+以及谱面存放位置（用户库路径，例：`%APPDATA%/auto_piano/songs/xxx.mid`）。

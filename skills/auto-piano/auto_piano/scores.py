@@ -234,7 +234,12 @@ def load(source, fmt=None, key='C', beat=DEFAULT_BEAT, velocity=DEFAULT_VELOCITY
 
 
 def load_file(path, fmt=None, key='C', beat=DEFAULT_BEAT, velocity=DEFAULT_VELOCITY):
-    """从文件加载。txt 文件支持 'format: jianpu/note_seq' 声明行 (任意位置)"""
+    """从文件加载。txt 文件支持 'format: jianpu/note_seq' 声明行 (任意位置)
+
+    path 可以是显式路径, 也可以是裸曲名: 依次在 用户谱面库 -> 包内示例 里查找
+    (见 library.py, 用户库在包外, 包更新不会影响)。"""
+    from . import library
+    path = str(library.resolve(path))
     if path.lower().endswith(('.mid', '.midi')):
         return parse_midi(path, velocity)
     text = open(path, encoding='utf-8').read()

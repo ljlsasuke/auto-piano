@@ -4,6 +4,8 @@ python -m auto_piano --file songs/xiaoxingxing.txt
 python -m auto_piano --midi x.mid --vel 110
 python -m auto_piano --jianpu "1 1 5 5 6 6 5-" --key C --bpm 100
 python -m auto_piano --notes "C4:1 C4:1 G4:2"
+python -m auto_piano --list         # 列出可用谱面 (用户库 + 包内示例)
+python -m auto_piano --save x.mid   # 存进用户谱面库 (包外, 包更新不受影响)
 python -m auto_piano --test        # 弹一个中央 C 验证链路
 python -m auto_piano --doctor      # 环境自检
 python -m auto_piano --selftest    # 离线自测 (不用 FreePiano, 校验解析/坐标)
@@ -13,7 +15,7 @@ python -m auto_piano --install     # 自动下载安装 FreePiano
 import argparse, sys
 from pathlib import Path
 
-from . import scores, config
+from . import scores, config, library
 from .keyboard import Player, find_window, client_scale
 from .notify import notify, WARN
 from .config import DEFAULT_BEAT, DEFAULT_VELOCITY
@@ -61,8 +63,45 @@ def doctor():
         print(f"[OK] 主窗口已找到 (hwnd={hwnd}, 客户区缩放 {sx:.2f}x{sy:.2f})")
     else:
         print("[--] 主窗口未找到 (若进程未运行则属正常; 若已运行请检查是否最小化)")
+    # 6. 谱面库 (用户库在包外, 包更新不会清空)
+    print(f"[--] 用户谱面库: {library.user_dir()}")
+    print(f"[--] 包内示例谱面 (只读, 会被包更新覆盖): {library.BUNDLED_DIR}")
+    rows = library.listing()
+    n_user = sum(1 for r in rows if r[1] == '用户库')
+    print(f"[--] 可用谱面 {len(rows)} 首 (用户库 {n_user} / 包内示例 {len(rows) - n_user})")
+    if library.is_bundled(library.user_dir()):
+        print(f"[!!] 用户谱面库落在包目录内, 会被更新清空! 请设 {library.ENV_SONGS} 指向包外目录")
+        ok = False
     print("== 自检结束 ==")
     return 0 if ok else 1
+
+
+def list_scores():
+    """--list: 用户库 + 包内示例"""
+    print(f"用户谱面库 (包外, 更新安全): {library.user_dir()}")
+    print(f"包内示例 (只读, 随包更新):   {library.BUNDLED_DIR}")
+    rows = library.listing()
+    if not rows:
+        print("\n(还没有任何谱面)")
+        return 0
+    width = max(len(r[0]) for r in rows) + 2
+    print()
+    for name, where, size, _p in rows:
+        print(f"  {name:<{width}} {where:<6} {size / 1024:6.1f} KB")
+    print(f"\n共 {len(rows)} 首。演奏: python -m auto_piano --file <曲名或路径>")
+    return 0
+
+
+def save_score(src, name=None, overwrite=False):
+    """--save: 把谱面存进用户库 (包外)"""
+    try:
+        dst = library.save(src, name=name, overwrite=overwrite)
+    except Exception as e:
+        print(f"!! 保存失败: {e}", file=sys.stderr)
+        return 1
+    print(f"已保存到用户库: {dst}")
+    print(f"以后可直接: python -m auto_piano --file \"{dst.name}\"")
+    return 0
 
 
 def setup(dir_path=None):
@@ -107,6 +146,14 @@ def main(argv=None):
     ap.add_argument('--vel', type=int, default=DEFAULT_VELOCITY, help='力度 1~127')
     ap.add_argument('--max-sec', type=float,
                     help='只演奏前 N 秒 (预览用, 长曲先听开头)')
+    ap.add_argument('--list', action='store_true',
+                    help='列出可用谱面 (用户库 + 包内示例)')
+    ap.add_argument('--save', metavar='FILE',
+                    help='把谱面存进用户库 (包外目录, 包更新不会清空)')
+    ap.add_argument('--as', dest='savename',
+                    help='配合 --save: 指定保存名 (纯文件名, 不含路径, 可省扩展名)')
+    ap.add_argument('--overwrite', action='store_true',
+                    help='配合 --save: 覆盖用户库同名文件')
     ap.add_argument('--test', action='store_true', help='弹一个中央 C 验证链路')
     ap.add_argument('--doctor', action='store_true', help='环境自检')
     ap.add_argument('--selftest', action='store_true', help='离线自测 (校验解析与坐标, 不碰 FreePiano)')
@@ -115,8 +162,17 @@ def main(argv=None):
     ap.add_argument('--install', action='store_true', help='自动下载安装 FreePiano')
     args = ap.parse_args(argv)
 
+    if args.savename and not args.save:
+        ap.error("--as 需要配合 --save 使用")
+    if args.overwrite and not args.save:
+        ap.error("--overwrite 需要配合 --save 使用")
+
     if args.doctor:
         return doctor()
+    if args.list:
+        return list_scores()
+    if args.save:
+        return save_score(args.save, name=args.savename, overwrite=args.overwrite)
     if args.selftest:
         from .selftest import run
         return run()

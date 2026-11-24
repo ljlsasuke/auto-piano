@@ -13,8 +13,8 @@
 谱面格式见 scores.py 模块文档。
 """
 from .keyboard import Player, find_window
-from . import scores
+from . import scores, library
 from .notify import notify
 
-__all__ = ['Player', 'find_window', 'scores', 'notify']
+__all__ = ['Player', 'find_window', 'scores', 'library', 'notify']
 __version__ = '1.0.0'

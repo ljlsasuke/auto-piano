@@ -16,10 +16,12 @@ FreePiano（免费键盘钢琴软件）的键盘钩子会过滤一切注入的�
 
 本 skill 目录即根目录（下文用 `{skill}` 指代本 SKILL.md 所在目录）：
 
-- 代码、示例谱、已保存谱面全在 skill 目录内，整个目录拷走即可放到任何机器、任何 agent 的 skills 目录下使用
+- 代码、示例谱全在 skill 目录内，整个目录拷走即可放到任何机器、任何 agent 的 skills 目录下使用
   （仍需 Windows + Python 3.8+，无第三方依赖）
 - 包代码: `{skill}/auto_piano/`
-- 谱面目录: `{skill}/songs/`（`.txt` 谱面 + `.mid` MIDI，统一放这里）
+- **只读示例谱**: `{skill}/songs/`（随包分发，会被包更新覆盖，**不要往里存用户谱面**）
+- **用户谱面库**: `%APPDATA%/auto_piano/songs`（包外目录，包更新/重装/换分支都不受影响，
+  用户保存的谱面一律在这里。可用环境变量 `AUTO_PIANO_SONGS` 或 config.json 的 `songs_dir` 改位置）
 
 命令一律在 **skill 目录**下执行（`cd {skill}` 后）：
 
@@ -30,7 +32,7 @@ python -m auto_piano --midi songs/mitsuha_theme.mid
 
 ## 找谱流程（MIDI 优先，必须遵守）
 
-用户点播的曲子如果 `songs/` 里没有，**先调用本目录下的 `find-score` 子 skill**（`find-score/SKILL.md`）检索谱源：
+用户点播的曲子如果两处都没有（`python -m auto_piano --list` 看不到），**先调用本目录下的 `find-score` 子 skill**（`find-score/SKILL.md`）检索谱源：
 
 1. 原始 MIDI 文件是唯一权威谱源，找到验证通过后直接 `--midi` 演奏；
 2. 找不到 MIDI 时**停下告知用户**，让用户自己去找，不要擅自降级；
@@ -41,13 +43,25 @@ python -m auto_piano --midi songs/mitsuha_theme.mid
 ## 谱面保存流程（重要，必须遵守）
 
 1. **新谱面演奏完成后，必须主动询问用户是否保存**（例如:「这首已经弹完了，要保存谱子吗？」）。
-   「新谱面」指：从网络/图片/MIDI 现场转录生成的、或用户临时给出的、且 `songs/` 里尚不存在的谱面。
-2. 用户同意后保存到 skill 的 `songs/` 目录：
-   - **原始 MIDI → 存 `.mid`（最优先，零误差）**
+   「新谱面」指：从网络/图片/MIDI 现场转录生成的、或用户临时给出的、且 `--list` 两处都没有的谱面。
+2. 用户同意后用 `--save` 存进**用户谱面库（包外）**，**绝不要**写进 skill 目录的 `songs/`：
+
+   ```bash
+   python -m auto_piano --save <文件>              # 沿用源文件名
+   python -m auto_piano --save <文件> --as <名字>   # 改保存名 (纯文件名, 可省扩展名)
+   python -m auto_piano --save <文件> --overwrite  # 覆盖用户库同名文件
+   ```
+
+   - 原始 MIDI → 存 `.mid`（最优先，零误差）
    - 简谱/音名序列 → 存 `.txt`（`auto_piano` 的谱面格式，便于改调/改速度）
    - 文件名用曲名拼音或英文，不含空格
+   - `--save` 内部会拒绝任何落在包目录内的目标（防止下次更新清掉用户谱面）
 3. 用户拒绝则不保存，也不写入任何文件。
-4. 已保存过的曲子再次演奏直接用 `songs/` 里的文件，无需重新转录，也不必再询问。
+4. 已保存过的曲子再次演奏直接用 `--file <曲名>`（查找顺序：显式路径 → 用户库 → 包内示例，
+   同名时用户库胜出），无需重新转录，也不必再询问。
+5. **为什么必须放包外**：pi 更新 git 包时执行 `git fetch` + `git reset --hard <远端>` +
+   `git clean -fdx`，包目录下**所有未跟踪文件（连 .gitignore 里的也删）**都会被清掉。
+   存进包内 = 用户谱面在下一次更新时必丢。
 
 ## FreePiano 路径解析（自动，不写死）
 
@@ -74,8 +88,9 @@ python -m auto_piano --midi songs/mitsuha_theme.mid
 ## 常用诊断命令
 
 ```bash
-python -m auto_piano --doctor   # 自检: Python/FreePiano 安装/进程/窗口/DPI缩放 逐项报告
-python -m auto_piano --selftest # 离线自测: 解析器/坐标契约, 不需要 FreePiano 在跑
+python -m auto_piano --doctor   # 自检: Python/FreePiano/进程/窗口/DPI + 谱面库路径
+python -m auto_piano --selftest # 离线自测: 解析器/坐标/谱面库, 不需要 FreePiano 在跑
+python -m auto_piano --list     # 列出可用谱面 (用户库 + 包内示例)
 python -m auto_piano --setup    # 交互式登记路径 (终端)
 python -m auto_piano --setup --dir "D:\freepiano"   # 直接登记, 非交互 (agent 优先用这个)
 python -m auto_piano --install  # 自动下载安装 FreePiano
@@ -87,13 +102,19 @@ python -m auto_piano --test     # 弹一个中央 C 验证链路
 ```bash
 cd {skill}          # 本 SKILL.md 所在目录
 
-# 弹内置示例
-python -m auto_piano --file songs/xiaoxingxing.txt
+# 看有哪些谱面 (用户库 + 包内示例)
+python -m auto_piano --list
+
+# 弹内置示例 (也可以只写曲名, 自动在 用户库 -> 包内示例 里找)
+python -m auto_piano --file xiaoxingxing
 python -m auto_piano --file songs/xiaoxingxing_jianpu.txt --key C
 
 # 弹 MIDI 文件（自动解析 tempo/多轨）
 python -m auto_piano --midi 某曲子.mid
-python -m auto_piano --midi songs/mitsuha_theme.mid
+python -m auto_piano --file mitsuha_theme.mid
+
+# 把新谱面存进用户库 (包外, 下次更新不会没)
+python -m auto_piano --save 某曲子.mid --as qiu_ming.mid
 
 # 直接弹简谱 / 音名序列字符串
 python -m auto_piano --jianpu "1 1 5 5 6 6 5-" --key C --bpm 100
@@ -136,18 +157,21 @@ C3+E3+G3:4 R:1
 ## Python API
 
 ```python
-from auto_piano import Player, scores
+from auto_piano import Player, scores, library
 
 p = Player()                          # 自动确保 FreePiano 已启动(未运行会拉起)
-events = scores.load_file('songs/xiaoxingxing.txt')
+events = scores.load_file('xiaoxingxing')   # 显式路径 / 裸曲名 (用户库 -> 包内示例)
 p.play(events)                        # 演奏；窗口中途被关会抛异常并释放所有按键
+
+library.save('新谱.mid')               # 存进用户库(%APPDATA%/auto_piano/songs)
+library.listing()                     # 列出可用谱面
 
 # 事件格式: [(start_sec, dur_sec, midi_num, velocity), ...]
 ```
 
-模块划分：`config.py` 路径解析/安装/坐标常量 | `process.py` 进程管理 | `mapping.py` 音名↔MIDI↔屏幕坐标
-| `keyboard.py` 演奏引擎 | `scores.py` 三种谱面解析 | `notify.py` 弹窗提示 | `selftest.py` 离线自测
-| `player.py` CLI。
+模块划分：`config.py` 路径解析/安装/坐标常量 | `library.py` 谱面库(用户库/查找/保存)
+| `process.py` 进程管理 | `mapping.py` 音名↔MIDI↔屏幕坐标 | `keyboard.py` 演奏引擎
+| `scores.py` 三种谱面解析 | `notify.py` 弹窗提示 | `selftest.py` 离线自测 | `player.py` CLI。
 
 ## 注意事项 / 排障
 
@@ -158,4 +182,5 @@ p.play(events)                        # 演奏；窗口中途被关会抛异常�
 - 音域 A0~C8（MIDI 21~108）：音名序列/简谱越界会直接报错；MIDI 超出部分自动裁剪到该音域。
 - 演奏期间用户可正常使用电脑（不需要焦点），打字不受影响。
 - 时序精度依赖 Python sleep（约 ±10ms），常规曲目无碍听感。
-- 示例与已保存谱面统一在 `songs/` 目录。
+- **谱面存哪**：包内 `songs/` 只是只读示例（会被包更新覆盖）；用户谱面一律存
+  `%APPDATA%/auto_piano/songs`（与 config.json 同目录），`--doctor` / `--list` 会打印两个路径。

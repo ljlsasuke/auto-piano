@@ -6,7 +6,7 @@
 """
 from pathlib import Path
 
-from . import scores
+from . import scores, library
 from .config import REF_CLIENT_W, REF_CLIENT_H, MIDI_MIN, MIDI_MAX
 from .mapping import note_num, note_name, key_point
 
@@ -34,6 +34,71 @@ def _raises(label, fn, exc=Exception):
 
 
 
+def _library_tests():
+    """谱面库: 用户库在包外 / 用户库同名优先 / 拒绝写回包内 (会被更新清空)"""
+    import os, tempfile
+    from . import library
+
+    tmp = Path(tempfile.mkdtemp(prefix='ap_lib_'))
+    saved_env = dict(os.environ)
+    saved_load_cfg = library.load_cfg
+    try:
+        user = tmp / 'user'
+        os.environ[library.ENV_SONGS] = str(user)
+        library.load_cfg = lambda: {}
+
+        # 裸曲名默认命中包内示例
+        hit = library.resolve('xiaoxingxing.txt')
+        _check("裸曲名命中包内示例", hit is not None and library.is_bundled(hit),
+               str(hit))
+
+        # 用户库同名时优先取用户库
+        user.mkdir(parents=True)
+        (user / 'xiaoxingxing.txt').write_bytes(b'1 1 5 5\n')
+        hit = library.resolve('xiaoxingxing.txt')
+        _check("用户库同名优先", hit is not None and not library.is_bundled(hit),
+               str(hit))
+
+        # 省略扩展名也能找到
+        _check("裸名可省扩展名", library.resolve('xiaoxingxing') is not None)
+
+        # 保存落到用户库 (包外)
+        src = tmp / 'sample.mid'
+        src.write_bytes(b'MThd\x00\x00\x00\x06')
+        dst = library.save(src)
+        _check("保存写入用户库", dst.parent == user and not library.is_bundled(dst),
+               str(dst))
+        _raises("同名不覆盖报错", lambda: library.save(src), FileExistsError)
+
+        # 保存名只能是纯文件名: 防路径穿越 / 防写到用户库外
+        _raises("拒绝路径型保存名",
+                lambda: library.save(src, name=str(tmp / 'evil.mid')), ValueError)
+        _raises("拒绝相对路径保存名",
+                lambda: library.save(src, name='sub/evil.mid'), ValueError)
+        # 省略扩展名 -> 沿用源扩展名; 非法扩展名直接拒绝
+        inherited = library.save(src, name='inherited', overwrite=True)
+        _check("省略扩展名沿用源扩展名", inherited.name == 'inherited.mid',
+               inherited.name)
+        _raises("拒绝非谱面扩展名",
+                lambda: library.save(src, name='evil.exe'), ValueError)
+
+        # 包内目录绝不能作为保存位置
+        library.load_cfg = lambda: {'songs_dir': str(library.BUNDLED_DIR)}
+        os.environ.pop(library.ENV_SONGS, None)
+        _raises("--save 拒绝写回包内", lambda: library.save(tmp / 'sample.mid'),
+                RuntimeError)
+
+        # listing 同名去重 (用户库胜出)
+        library.load_cfg = lambda: {}
+        os.environ[library.ENV_SONGS] = str(user)
+        names = {r[0]: r[1] for r in library.listing()}
+        _check("列表同名用户库胜出", names.get('xiaoxingxing.txt') == '用户库',
+               str(names.get('xiaoxingxing.txt')))
+    finally:
+        library.load_cfg = saved_load_cfg
+        os.environ.clear(); os.environ.update(saved_env)
+
+
 def _path_priority_tests():
     """路径解析优先级: env > 运行中进程 > config 缓存 > 安装位候选。
     全部在临时目录里跑, 不碰真实 %APPDATA% 配置。"""
@@ -42,16 +107,20 @@ def _path_priority_tests():
 
     tmp = Path(tempfile.mkdtemp(prefix='ap_selftest_'))
     saved_env = dict(os.environ)
-    saved = (config.CFG_DIR, config.CFG_FILE, config._running_freepiano_dir)
+    saved = (config.CFG_DIR, config.CFG_FILE, config._running_freepiano_dir,
+             config.candidate_dirs)
     try:
         config.CFG_DIR = tmp / 'roaming' / 'auto_piano'
         config.CFG_FILE = config.CFG_DIR / 'config.json'
         os.environ.pop(config.ENV_KEY, None)
         os.environ['LOCALAPPDATA'] = str(tmp / 'local')
         config._running_freepiano_dir = lambda: None
+        # INSTALL_DIR 是模块级常量, 改环境变量救不了 -> 直接接管候选列表,
+        # 否则本机真的装了 FreePiano 时 "全空" 用例会误命中真实安装位
+        cand = tmp / 'local' / 'freepiano'
+        config.candidate_dirs = lambda: [cand, cand / 'freepiano']
 
         # 候选 (local/freepiano) 命中并写缓存
-        cand = tmp / 'local' / 'freepiano'
         cand.mkdir(parents=True); (cand / 'freepiano.exe').write_bytes(b'')
         d, src = config.resolve_freepiano_dir()
         _check("候选命中不扫描", src == 'candidate', f'{src} / {d}')
@@ -82,7 +151,8 @@ def _path_priority_tests():
         config.CFG_FILE.unlink(missing_ok=True)
         _check("都没有时返回 None", config.resolve_freepiano_dir() == (None, None))
     finally:
-        config.CFG_DIR, config.CFG_FILE, config._running_freepiano_dir = saved
+        (config.CFG_DIR, config.CFG_FILE, config._running_freepiano_dir,
+         config.candidate_dirs) = saved
         os.environ.clear(); os.environ.update(saved_env)
 
 
@@ -149,17 +219,17 @@ def run():
     else:
         _check("MIDI 样例存在", False, str(mid))
 
-    # 7. 已保存谱面都能解析
-    songs = Path(__file__).resolve().parents[1] / 'songs'
+    # 7. 已保存谱面都能解析 (用户库 + 包内示例)
     bad = []
-    for f in sorted(songs.glob('*.txt')) + sorted(songs.glob('*.mid')):
+    for name, where, _size, path in library.listing():
         try:
-            if not scores.load_file(str(f)):
-                bad.append((f.name, '空谱面'))
+            if not scores.load_file(str(path)):
+                bad.append((name, '空谱面'))
         except Exception as e:
-            bad.append((f.name, f'{type(e).__name__}: {e}'))
-    _check("songs/ 内全部谱面可解析", not bad, str(bad))
+            bad.append((name, f'{type(e).__name__}: {e}'))
+    _check("全部谱面可解析", not bad, str(bad))
 
+    _library_tests()
     _path_priority_tests()
 
     print(f"== 自测结束: {len(_fails)} 项失败 ==")
