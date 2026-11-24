@@ -181,7 +181,7 @@ def _make_mid(path, division, tracks):
 def _midi_timing_tests():
     """MIDI 时间轴契约: tempo 分段积分 / format1 控制轨 / SMPTE 时基 / meta 变长长度
 
-    旧实现用「当前 tempo × 绝对 tick」, 多 tempo 文件的时长会偏 +66%~+386%;
+    旧实现用「当前 tempo × 绝对 tick」, 多 tempo 文件的时长会偏 +30%~+386%;
     SMPTE 与长 meta 文件则直接抛异常。这里用 4 个内存合成的小文件钉死精确秒数,
     不依赖任何真实谱面, 也不依赖 Windows。"""
     import os, shutil, tempfile
