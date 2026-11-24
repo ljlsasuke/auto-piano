@@ -105,6 +105,8 @@ def main(argv=None):
                     help='强制指定谱面格式')
     ap.add_argument('--bpm', type=float, help='速度 (拍/分钟), 覆盖默认 109')
     ap.add_argument('--vel', type=int, default=DEFAULT_VELOCITY, help='力度 1~127')
+    ap.add_argument('--max-sec', type=float,
+                    help='只演奏前 N 秒 (预览用, 长曲先听开头)')
     ap.add_argument('--test', action='store_true', help='弹一个中央 C 验证链路')
     ap.add_argument('--doctor', action='store_true', help='环境自检')
     ap.add_argument('--selftest', action='store_true', help='离线自测 (校验解析与坐标, 不碰 FreePiano)')
@@ -157,6 +159,14 @@ def main(argv=None):
         if not events:
             raise ValueError("谱面解析结果为空")
         total = max(s + d for s, d, *_ in events)
+        if args.max_sec:
+            # 预览: 只留起始时间在前 N 秒的音, 并把尾部裁到 N 秒避免长音悬在那里
+            events = [(s, min(d, args.max_sec - s), n, v)
+                      for s, d, n, v in events if s < args.max_sec]
+            if not events:
+                raise ValueError(f"前 {args.max_sec}s 内没有音符")
+            print(f"预览模式: 只演奏前 {args.max_sec:g}s (完整时长 {total:.1f}s)")
+            total = max(s + d for s, d, *_ in events)
         print(f"解析完成: {len(events)} 个音符事件, 时长约 {total:.1f}s, 开始演奏...")
 
         p = Player()

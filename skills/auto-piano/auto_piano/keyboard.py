@@ -78,10 +78,11 @@ class Player:
     ensure_process=True 时自动确保 FreePiano 已启动 (未安装/未找到会给出指引)。
     """
 
-    def __init__(self, ensure_process=True, wait_sec=5):
+    def __init__(self, ensure_process=True, wait_sec=None):
+        """wait_sec: 仅当需要冷启动时的就绪超时上限 (秒), None 用 process 的默认值"""
         if ensure_process:
-            from .process import ensure_running
-            ensure_running(wait_sec)
+            from .process import ensure_running, READY_TIMEOUT
+            ensure_running(READY_TIMEOUT if wait_sec is None else wait_sec)
         self.hwnd = find_window()
         if not self.hwnd:
             raise RuntimeError(
